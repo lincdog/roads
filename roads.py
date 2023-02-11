@@ -32,7 +32,7 @@ def f_num(num):
 
         
 def state_folder(state, num):
-    return '_'.join([f_num(num), state.upper()])
+    return '_'.join([f_num(num), state.upper().replace(' ', '_')])
 
 
 state2num = {s: f_num(n) for s, n in zip(STATES, NUMS)}
@@ -210,7 +210,7 @@ class StateMaps:
 
             for i, f in enumerate(as_completed(futures)):
                 n_ints, a_ints = f.result()
-                print(f'{i+1}: {n_ints}, {a_ints} m^2')
+                #print(f'{i+1}: {n_ints}, {a_ints} m^2')
                 
                 num_intersections += n_ints
                 area_intersections += a_ints
