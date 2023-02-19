@@ -1,6 +1,9 @@
 from pathlib import Path
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from shapely import geometry
+from random import shuffle
 
 import geopandas as gpd
 import numpy as np
@@ -99,6 +102,28 @@ def map_count_intersections(blocks, roads):
     intersects_area = blocks[intersects].area.sum()
     
     return (n_intersections, intersects_area)
+  
+
+@dataclass
+class IntersectionResult:
+    state_name: str
+    sidelength: float
+    chunksize: int
+    n_workers: int
+
+    area_total: float
+    area_used: float
+    area_with_intersects: float
+        
+    n_blocks_total: int
+    n_blocks_used: int
+    n_blocks_with_intersects: int
+        
+    time_make_blocks: timedelta
+    time_get_intersections: timedelta
+    
+    
+        
     
 class StateMaps:
     def __init__(
@@ -124,24 +149,47 @@ class StateMaps:
         self.bounds = self.edge_data_m.total_bounds
         self.minx, self.miny, self.maxx, self.maxy = self.bounds
         
-        self.blocks = None
+        self.blocks = gpd.GeoSeries(crs=self.edge_data_m.crs)
+        self.n_blocks = 0
         
     def make_blocks(
         self,
-        sidelength
+        sidelength,
+        frac=None,
+        chunksize=10000
     ):
+        breakpoint()
+        
         blocks_arr = []
         
         for x in np.arange(self.minx, self.maxx, sidelength):
             for y in np.arange(self.miny, self.maxy, sidelength):
                 blocks_arr.append(box_from_coords(x, y, sidelength))
-                
-        blocks = gpd.GeoSeries(data=blocks_arr, crs=self.road_data_m.crs)
-        blocks_in_edge = blocks.intersection(self.edge)
         
-        self.blocks = blocks_in_edge[~blocks_in_edge.is_empty]
+        shuffle(blocks_arr)
         
-        self.n_blocks = len(self.blocks)
+        frac = frac or 1
+        if frac < 0 or frac > 1:
+            frac = 1
+        
+        area_goal = frac * self.area
+        n_blocks_goal = round(area_goal / blocks_arr[0].area)
+        
+        n_blocks = 0
+        
+        for bstart in np.arange(0, len(blocks_arr), chunksize):
+            blocks = gpd.GeoSeries(
+                data=blocks_arr[bstart:bstart+chunksize], 
+                crs=self.road_data_m.crs
+            )
+            blocks_in_edge = blocks.intersection(self.edge)
+            blocks_in_edge = blocks_in_edge[~blocks_in_edge.is_empty]
+            
+            n_blocks += len(blocks_in_edge)
+            self.blocks.append(blocks_in_edge)
+            
+            if n_blocks >= n_blocks_goal:
+                break
    
     def _get_intersections_simple(
         self,
@@ -192,18 +240,31 @@ class StateMaps:
     def get_intersections(
         self,
         chunksize=250,
-        max_workers=6
+        max_workers=6,
+        n_blocks=None
     ):
         num_intersections = 0
         area_intersections = 0
         
         futures = []
-
+        
+        if (not n_blocks) or n_blocks > self.n_blocks:
+            n_blocks = self.n_blocks
+        
+        if n_blocks < 1:
+            self.blocks_work = self.blocks.sample(frac=n_blocks)
+        else:
+            self.blocks_work = self.blocks.sample(n=n_blocks)
+            
+        self.n_blocks_work = len(self.blocks_work)
+        
+        print(f'Number of blocks used: {self.n_blocks_work}')
+        
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            for start_index in range(0, self.n_blocks, chunksize):
+            for start_index in range(0, self.n_blocks_work, chunksize):
                 future = executor.submit(
                     map_count_intersections, 
-                    self.blocks.values[start_index:start_index+chunksize],
+                    self.blocks_work.values[start_index:start_index+chunksize],
                     self.all_roads
                 )
                 futures.append(future)
@@ -221,5 +282,11 @@ class StateMaps:
         return (num_intersections, self.area_intersections)
         
         
-        
+def init_state_analysis(statename):
+    state_data = StateData(statename)
+    
+    state_roads_file = state_data.statewide_file_path('prisecroads', '.shp')
+    state_edge_file = state_data.statewide_file_path('cd118', '.shp')
+    
+    return StateMaps(state_roads_file, state_edge_file)
         
