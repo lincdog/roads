@@ -6,6 +6,7 @@ from shapely import geometry
 from random import shuffle
 
 import geopandas as gpd
+import pandas as pd
 import numpy as np
 import warnings
 
@@ -177,6 +178,8 @@ class StateMaps:
         
         n_blocks = 0
         
+        block_list_in_edge = []
+        
         for bstart in np.arange(0, len(blocks_arr), chunksize):
             blocks = gpd.GeoSeries(
                 data=blocks_arr[bstart:bstart+chunksize], 
@@ -186,10 +189,14 @@ class StateMaps:
             blocks_in_edge = blocks_in_edge[~blocks_in_edge.is_empty]
             
             n_blocks += len(blocks_in_edge)
-            self.blocks.append(blocks_in_edge)
+            block_list_in_edge.append(blocks_in_edge)
             
             if n_blocks >= n_blocks_goal:
                 break
+            
+        self.blocks = pd.concat(block_list_in_edge)
+        self.n_blocks = len(self.blocks)
+        self.area_blocks = self.blocks.area.sum()
    
     def _get_intersections_simple(
         self,
@@ -217,7 +224,7 @@ class StateMaps:
         chunksize=1000,
         max_workers=6
     ):
-        num_intersections = 0
+        n_intersections = 0
         
         i = 0
         
@@ -229,42 +236,29 @@ class StateMaps:
          
         futures = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            num_intersections += sum(executor.map(
+            n_intersections += sum(executor.map(
                 self._get_intersections_simple, 
                 bboxes, 
                 chunksize=chunksize
             ))
                 
-        return num_intersections
+        return n_intersections
         
     def get_intersections(
         self,
         chunksize=250,
         max_workers=6,
-        n_blocks=None
     ):
-        num_intersections = 0
+        n_intersections = 0
         area_intersections = 0
         
         futures = []
-        
-        if (not n_blocks) or n_blocks > self.n_blocks:
-            n_blocks = self.n_blocks
-        
-        if n_blocks < 1:
-            self.blocks_work = self.blocks.sample(frac=n_blocks)
-        else:
-            self.blocks_work = self.blocks.sample(n=n_blocks)
-            
-        self.n_blocks_work = len(self.blocks_work)
-        
-        print(f'Number of blocks used: {self.n_blocks_work}')
-        
+                        
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            for start_index in range(0, self.n_blocks_work, chunksize):
+            for start_index in range(0, self.n_blocks, chunksize):
                 future = executor.submit(
                     map_count_intersections, 
-                    self.blocks_work.values[start_index:start_index+chunksize],
+                    self.blocks.values[start_index:start_index+chunksize],
                     self.all_roads
                 )
                 futures.append(future)
@@ -273,13 +267,13 @@ class StateMaps:
                 n_ints, a_ints = f.result()
                 #print(f'{i+1}: {n_ints}, {a_ints} m^2')
                 
-                num_intersections += n_ints
+                n_intersections += n_ints
                 area_intersections += a_ints
                 
-        self.num_intersections = num_intersections
+        self.n_intersections = n_intersections
         self.area_intersections = area_intersections
         
-        return (num_intersections, self.area_intersections)
+        return (n_intersections, self.area_intersections)
         
         
 def init_state_analysis(statename):
