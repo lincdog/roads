@@ -108,20 +108,22 @@ def map_count_intersections(blocks, roads):
 @dataclass
 class IntersectionResult:
     state_name: str
-    sidelength: float
-    chunksize: int
-    n_workers: int
+    sidelength: float = 0
+    chunksize: int = 0
+    n_workers: int = 0
 
-    area_total: float
-    area_used: float
-    area_with_intersects: float
+    area_total: float = 0
+    area_used: float = 0
+    area_with_intersects: float = 0
+    area_frac_with_intersects: float = 0
         
-    n_blocks_total: int
-    n_blocks_used: int
-    n_blocks_with_intersects: int
+    frac_blocks: float = 0
+    n_blocks_used: int = 0
+    n_blocks_with_intersects: int = 0
+    n_frac_with_intersections: float = 0
         
-    time_make_blocks: timedelta
-    time_get_intersections: timedelta
+    time_make_blocks: timedelta = 0
+    time_get_intersections: timedelta = 0
     
     
         
@@ -159,8 +161,7 @@ class StateMaps:
         frac=None,
         chunksize=10000
     ):
-        breakpoint()
-        
+
         blocks_arr = []
         
         for x in np.arange(self.minx, self.maxx, sidelength):
@@ -197,52 +198,6 @@ class StateMaps:
         self.blocks = pd.concat(block_list_in_edge)
         self.n_blocks = len(self.blocks)
         self.area_blocks = self.blocks.area.sum()
-   
-    def _get_intersections_simple(
-        self,
-        bounds
-    ):
-        minx, maxx, miny, maxy = bounds
-        result = 0
-        
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            # find intersection
-            edge_clipped = self.edge_df.clip_by_rect(minx, miny, maxx, maxy)
-            # check if nonempty intersection
-            if not edge_clipped.is_empty.all():
-                roads_in_box = self.all_roads_df.clip_by_rect(minx, miny, maxx, maxy)
-
-                if not roads_in_box.is_empty.all():
-                    result = 1
-        
-        return result
-
-    def get_intersections_simple(
-        self,
-        sidelength,
-        chunksize=1000,
-        max_workers=6
-    ):
-        n_intersections = 0
-        
-        i = 0
-        
-        bboxes = []
-        
-        for x in np.arange(self.minx, self.maxx, sidelength):
-            for y in np.arange(self.miny, self.maxy, sidelength):
-                bboxes.append((x, y, x+sidelength, y+sidelength))
-         
-        futures = []
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            n_intersections += sum(executor.map(
-                self._get_intersections_simple, 
-                bboxes, 
-                chunksize=chunksize
-            ))
-                
-        return n_intersections
         
     def get_intersections(
         self,
@@ -276,11 +231,68 @@ class StateMaps:
         return (n_intersections, self.area_intersections)
         
         
-def init_state_analysis(statename):
-    state_data = StateData(statename)
+class StateAnalysis:
     
-    state_roads_file = state_data.statewide_file_path('prisecroads', '.shp')
-    state_edge_file = state_data.statewide_file_path('cd118', '.shp')
-    
-    return StateMaps(state_roads_file, state_edge_file)
+    def __init__(self, state_name):
+        self.state_data = StateData(state_name)
+        
+        self.state_roads_file = self.state_data.statewide_file_path('prisecroads', '.shp')
+        self.state_edge_file = self.state_data.statewide_file_path('cd118', '.shp')
+        
+        self.state_maps = StateMaps(self.state_roads_file, self.state_edge_file)
+        
+        self.result = dict(
+            state_name=state_name,
+            area_total=self.state_maps.area
+        )
+        
+    def run_analysis(
+        self,
+        block_sidelength,
+        block_frac=None,
+        block_chunksize=10000,
+        int_chunksize=250,
+        int_max_workers=6
+    ):
+        self.result['sidelength'] = block_sidelength
+        self.result['frac_blocks'] = block_frac
+        
+        block_start = datetime.now()
+        
+        self.state_maps.make_blocks(
+            sidelength=block_sidelength,
+            frac=block_frac,
+            chunksize=block_chunksize
+        )
+        
+        block_end = datetime.now()
+        
+        self.result['time_make_blocks'] = block_end - block_start
+        
+        self.result['n_blocks_used'] = self.state_maps.n_blocks
+        self.result['area_used'] = self.state_maps.area_blocks
+        
+        self.result['chunksize'] = int_chunksize
+        self.result['n_workers'] = int_max_workers
+        
+        int_start = datetime.now()
+        
+        (n_ints, a_ints) = self.state_maps.get_intersections(
+            chunksize=int_chunksize,
+            max_workers=int_max_workers
+        )
+        
+        int_end = datetime.now()
+        
+        self.result['time_get_intersections'] = int_end - int_start
+        
+        self.result['n_blocks_with_intersects'] = n_ints
+        self.result['n_frac_with_intersects'] = n_ints / self.result['n_blocks_used']
+        self.result['area_with_intersects'] = a_ints
+        self.result['area_frac_with_intersects'] = a_ints / self.result['area_used']
+        
+        return self.result
+        
+        
+        
         
