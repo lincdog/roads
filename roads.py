@@ -1,5 +1,4 @@
 from pathlib import Path
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from shapely import geometry
@@ -105,29 +104,6 @@ def map_count_intersections(blocks, roads):
     return (n_intersections, intersects_area)
   
 
-@dataclass
-class IntersectionResult:
-    state_name: str
-    sidelength: float = 0
-    chunksize: int = 0
-    n_workers: int = 0
-
-    area_total: float = 0
-    area_used: float = 0
-    area_with_intersects: float = 0
-    area_frac_with_intersects: float = 0
-        
-    frac_blocks: float = 0
-    n_blocks_used: int = 0
-    n_blocks_with_intersects: int = 0
-    n_frac_with_intersections: float = 0
-        
-    time_make_blocks: timedelta = 0
-    time_get_intersections: timedelta = 0
-    
-    
-        
-    
 class StateMaps:
     def __init__(
         self,
